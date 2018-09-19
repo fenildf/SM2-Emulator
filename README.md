@@ -4,6 +4,7 @@ Anki Addon: Makes Anki buttons behave like SuperMemo/Mnemosyne
 
 ## Configs:
 For version 1 scheduler on anki 2.0 and 2.1
+
 Addon must be activated per deck under deck options menu.
 
 
@@ -19,4 +20,3 @@ Algorithm SM-2, (C) Copyright SuperMemo World, 1991.
 http://www.supermemo.com
 
 http://www.supermemo.eu
-
