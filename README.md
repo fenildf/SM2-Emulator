@@ -11,15 +11,15 @@ Phase 3: Mad retention
 
 Users who test this custom scheduler for more than a month should see a noticeable difference in the number of daily reviews and retention. Optionally, filtered decks maybe used to compensate for short-term retention in situations where mass studying is required.
 
-Ratings:  
+<i>Ratings:</i>  
 Thumb it down to express this addon's awfulness.
 
 
-<b>Configs:</b>
+## Configs:
 Addon must be activated per deck under deck options menu.
 
 For version 1 scheduler on anki 2.0 and 2.1.  
-Why not support the V2 scheduler?  
+<i>Why not support the V2 scheduler?</i>  
 Anki21 is by any means matured. It could be taxing trying to keep up with the lapses.
 
 
@@ -34,7 +34,7 @@ Vacation - Use it when you need a break, but do not abuse this one.
 Beefcake - Similar to anki's default profile (mass study).  
 Defer Leech - Auto adjust initial intervals based on previous lapses.  
 
-Profile settings only affects the first two intervals on new/lapsed cards.
+<i>Profile settings only affects the first two intervals on new/lapsed cards.</i>
 
 
 # Algorithm License:
