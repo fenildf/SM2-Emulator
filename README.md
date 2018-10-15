@@ -20,7 +20,7 @@ Addon must be activated per deck under deck options menu.
 
 For version 1 scheduler on anki 2.0 and 2.1.  
 <i>Why not support the V2 scheduler?</i>  
-Anki21 is by any means matured. It could be taxing trying to keep up with the lapses.
+Anki21 is by no means matured. It could be taxing trying to keep up with the lapses.
 
 
 ## Screenshots:
