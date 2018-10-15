@@ -19,13 +19,14 @@ import time, random
 # CONFIG ###################################
 
 #ADDS SLIGHT INTERLEAVE
-DELAY_AGAINED  = 0 # this + learning steps[0]
-DELAY_HARD     = 30 # this + learning steps[0]
+DELAY_AGAINED  = 0  #secs,  this + learning steps[0]
+DELAY_HARD     = 30 #secs,  this + learning steps[0]
 
 #FACTOR ADD/SUB
-INC_FACTOR = 100  #EasyBtn: 100 sm2, 150 anki
+INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
 DEC_FACTOR = -140  #HardBtn: -140 sm2, -150 anki
-ALT_FACTOR = 0  #AgainBtn: 0 sm2, -200 anki, -160 Mnemosyne
+ALT_FACTOR = 0     #AgainBtn: 0 sm2, -200 anki, -160 Mnemosyne
+
 
 # END_CONFIG ###########################################
 
@@ -70,10 +71,13 @@ def isFiltered():
 
     return False
 
+
 def onShowQuestion():
     global isFilteredCard
     isFilteredCard=isFiltered()
+
 addHook('showQuestion', onShowQuestion)
+
 
 #####################################################################
 ####      Button Display                         ####################
@@ -103,10 +107,10 @@ def answerButtonList(self, _old):
 
 
 def buttonTime(self, i, _old):
-    c=card=self.card
     if isFilteredCard:
         return _old(self, i)
 
+    c=self.card
     text=None
     if i==1:
         text='IVL 0' if c.ivl<21 else 'Revert'
@@ -174,8 +178,8 @@ def answerCard(self, card, ease, _old):
     if ease==1: #reset young, revert matured
         if not isLeechCard(card): #chk suspend
             card.ivl=revertInterval(card)
-            repeatCard(self, card, DELAY_AGAINED) #sets queue to 1
             card.factor=adjustFactor(card, ALT_FACTOR)
+            repeatCard(self, card, DELAY_AGAINED) #sets queue to 1
 
     elif ease==2: #repeat, -140ef
         card.factor=adjustFactor(card, DEC_FACTOR)
@@ -275,7 +279,10 @@ def nextInterval(self, card, ease):
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
 #Some codes came from anki.sched.Scheduler.dueForecast.
 def custFuzzedIvl(today, ivl):
-    if ivl <= SEC_IVL: return ivl
+    if ivl <= 3: return ivl
+    #less agressive LB, more review spikes
+    # if ivl <= SEC_IVL: return ivl
+
     minDay, maxDay = custFuzzIvlRange(ivl)
     if minDay<90:
         #In cases of paused decks, balancing per deck is preferred.
