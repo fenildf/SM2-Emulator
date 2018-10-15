@@ -1,4 +1,4 @@
-#Plan 9: SM2 Emulator
+# Plan 9: SM2 Emulator  
 Anki Addon: Makes Anki buttons behave like SuperMemo/Mnemosyne
 
 ## About:
@@ -23,11 +23,11 @@ Why not support the V2 scheduler?
 Anki21 is by any means matured. It could be taxing trying to keep up with the lapses.
 
 
-##Screenshots:
+## Screenshots:
 ![Image](https://github.com/lovac42/SM2-Emulator/blob/master/screenshots/deck_option_menu.png?raw=true "deck_menu")
 
 
-##Profiles:
+## Profiles:
 Normal - Use this for regular learning.  
 Slacker - Use this if you use alternate study sources (e.g. Duolingo).  
 Vacation - Use it when you need a break, but do not abuse this one.  
