@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.1
+# Version: 0.0.3
 
 
 from __future__ import division
@@ -178,7 +178,6 @@ def answerCard(self, card, ease, _old):
     if ease==1: #reset young, revert matured
         if not isLeechCard(card): #chk suspend
             card.ivl=revertInterval(card)
-            card.factor=adjustFactor(card, ALT_FACTOR)
             repeatCard(self, card, DELAY_AGAINED) #sets queue to 1
 
     elif ease==2: #repeat, -140ef
@@ -252,7 +251,6 @@ def nextInterval(self, card, ease):
 
     conf=mw.col.decks.confForDid(card.did)
     deferLeech=adjustPriorityInterval(card, conf)
-    modifier=conf['rev'].get('ivlFct', 1)
     idealIvl=1
 
     if card.ivl==0:
@@ -271,9 +269,12 @@ def nextInterval(self, card, ease):
             delay = max(-10, self.today - card.due) #slight punishment for reviewing ahead.
             delay = min(card.ivl, min(100, delay)) #paused young decks
         ef=getEaseFactor(card, ease, delay)
+        modifier=conf['rev'].get('ivlFct', 1)
+        #IVL*ef*modifier may result in smaller IVL
         idealIvl = (card.ivl + delay // 2) * ef * modifier
 
-    return min(int(idealIvl), conf['rev']['maxIvl'])
+    idealIvl = max(card.ivl+1, int(idealIvl)) #prevent smaller ivls from %modifier%
+    return min(idealIvl, conf['rev']['maxIvl'])
 
 
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
@@ -357,7 +358,9 @@ select ivl from revlog where cid = ? and ivl >= 21 order by id desc
 """, card.id)
     if hist:
         hist = [i for i in hist if i < card.ivl]
-        if hist: return hist[0]
+        if hist:
+            card.factor=adjustFactor(card, ALT_FACTOR)
+            return hist[0]
     return 0
 
 
