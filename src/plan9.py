@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.3
+# Version: 0.0.4
 
 
 from __future__ import division
@@ -26,7 +26,6 @@ DELAY_HARD     = 30 #secs,  this + learning steps[0]
 INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
 DEC_FACTOR = -140  #HardBtn: -140 sm2, -150 anki
 ALT_FACTOR = 0     #AgainBtn: 0 sm2, -200 anki, -160 Mnemosyne
-
 
 # END_CONFIG ###########################################
 
@@ -190,8 +189,8 @@ def answerCard(self, card, ease, _old):
             card.due = self.today + 1
         else:
             idealIvl = nextInterval(self, card, ease)
-            card.ivl = custFuzzedIvl(self.today, idealIvl)
-            card.due = self.today + idealIvl
+            card.ivl = custFuzzedIvl(self.today, idealIvl, card.queue)
+            card.due = self.today + card.ivl
         card.type = card.queue = 2
         card.left = 0
         if ease==4: #Mnemosyne adds this value first, anki adds this last, makes little diff to IVL
@@ -241,7 +240,7 @@ def adjustPriorityInterval(card, conf):
 def nextIntervalString(card, ease): #button date display
     ivl=nextInterval(mw.col.sched, card, ease)
     #displays exact fuzzed date, but maybe process intensive
-    # if ivl<33: ivl=custFuzzedIvl(mw.col.sched.today, ivl)
+    # if ivl<33: ivl=custFuzzedIvl(mw.col.sched.today, ivl, card.queue)
     return fmtTimeSpan(ivl*86400, short=True)
 
 
@@ -279,17 +278,15 @@ def nextInterval(self, card, ease):
 
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
 #Some codes came from anki.sched.Scheduler.dueForecast.
-def custFuzzedIvl(today, ivl):
-    if ivl <= 3: return ivl
-    #less agressive LB, more review spikes
-    # if ivl <= SEC_IVL: return ivl
+def custFuzzedIvl(today, ivl, queue=2):
+    if queue==1 or ivl<=1: return ivl #exact date for hard/agained
 
     minDay, maxDay = custFuzzIvlRange(ivl)
-    if minDay<90:
+    if minDay<90 and random.randint(0,6): #introduce noise
         #In cases of paused decks, balancing per deck is preferred.
         #But not in cases where there are too many sub-decks.
         perDeck=""
-        if maxDay>32:
+        if maxDay>32: #2d overlap
             perDeck="did in %s and"%ids2str(mw.col.decks.active())
 
         daysd = dict(mw.col.db.all("""
@@ -310,13 +307,13 @@ order by due"""%perDeck,
     return random.randint(minDay, maxDay)
 
 
-def custFuzzIvlRange(ivl):
-    if ivl < 15: return [ivl, ivl+1]    #2
-    if ivl < 21: return [ivl-1, ivl+1]  #3
-    if ivl < 42: return [ivl-1, ivl+2]  #4
-    if ivl < 60: return [ivl-2, ivl+2]  #5
-    if ivl < 120: return [ivl-2, ivl+3] #6
-    return [ivl-3, ivl+3] #max 7 range
+def custFuzzIvlRange(ivl): # Multiples of 7
+    if ivl <  7: return [ivl,   ivl+1]  #r2, x1
+    if ivl < 21: return [ivl-1, ivl+1]  #r3, x3
+    if ivl < 42: return [ivl-1, ivl+2]  #r4, x6
+    if ivl < 84: return [ivl-2, ivl+2]  #r5, x12
+    if ivl <168: return [ivl-2, ivl+3]  #r6, x24
+    return [ivl-3, ivl+3] #max range 7
 
 
 #####################################################################
