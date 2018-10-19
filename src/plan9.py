@@ -2,7 +2,8 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.4
+# Version: 0.0.5
+
 
 
 from __future__ import division
@@ -142,15 +143,10 @@ def buttonTime(self, i, _old):
 ########   Custom Scheduler                              ############
 #####################################################################
 
-#TYPE-QUEUE FLAGS:
-# 00 = new cards
-# 01 = new learning cards
-# 21 = lapsed relearning cards
-# 22 = reviews
 
-LOG_REVIEWED=1
 LOG_LEARNED=0
-
+LOG_REVIEWED=1
+LOG_RELEARNED=2
 
 def answerCard(self, card, ease, _old):
     if isFilteredCard:
@@ -170,7 +166,7 @@ def answerCard(self, card, ease, _old):
         logType = LOG_LEARNED
         revType = 'new'
     elif card.queue==1:
-        logType = card.type # re/learning card
+        logType=LOG_RELEARNED if card.type==2 else LOG_LEARNED
         revType = 'lrn'
 
     #PROCESS GRADES
@@ -246,7 +242,7 @@ def nextIntervalString(card, ease): #button date display
 
 def nextInterval(self, card, ease):
     if ease==4 and card.queue!=1 and card.ivl<=INIT_IVL:
-        return BUMP_IVL
+        return random.randint(BUMP_IVL-1, BUMP_IVL+2)
 
     conf=mw.col.decks.confForDid(card.did)
     deferLeech=adjustPriorityInterval(card, conf)
@@ -365,7 +361,12 @@ def repeatCard(self, card, due):
     card.left = 1001
     conf=self._lrnConf(card)
     delay=self._delayForGrade(conf,0)
+
+    #new cards in learning steps: card.type=1
+    #lapse cards in learning steps: card.type=2
+    card.type=2 if card.type==2 else 1
     card.queue = 1
+
     card.due = intTime() + delay + due
     self.lrnCount += 1
     heappush(self._lrnQueue, (card.due, card.id))
