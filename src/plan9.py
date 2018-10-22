@@ -2,8 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.5
-
+# Version: 0.0.6
 
 
 from __future__ import division
@@ -19,9 +18,9 @@ import time, random
 
 # CONFIG ###################################
 
-#ADDS SLIGHT INTERLEAVE
-DELAY_AGAINED  = 0  #secs,  this + learning steps[0]
-DELAY_HARD     = 30 #secs,  this + learning steps[0]
+#ADDS SLIGHT INTERLEAVE, TIME DEPENDENT
+DELAY_AGAINED  = 0   #secs,  this + learning steps[0]
+DELAY_HARD     = 30  #secs,  this + learning steps[0]
 
 #FACTOR ADD/SUB
 INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
@@ -183,6 +182,8 @@ def answerCard(self, card, ease, _old):
         #Repeats an extra day to avoid judgement of learning bias (not in SM2)
         if card.queue==1 and card.ivl>=21:
             card.due = self.today + 1
+            # Adds 2-3 days load balanced
+            # card.due = self.today + custFuzzedIvl(self.today, 2)
         else:
             idealIvl = nextInterval(self, card, ease)
             card.ivl = custFuzzedIvl(self.today, idealIvl, card.queue)
@@ -209,10 +210,11 @@ def adjustFactor(card, n):
 
 
 #Trim EF based on number of lapses
-def getEaseFactor(card, ease=3, delay=0):
+def getEaseFactor(card, ease=3, overdue=0):
     if card.reps==0: #prevent div by 0 on new cards
+        card.factor=2500 #init
         return 2.5
-    fct=adjustFactor(card, -delay)
+    fct=adjustFactor(card, -overdue)
     lr=card.lapses/card.reps #Leech Ratio
     if ease==4 and card.queue!=1:
         if card.ivl>21:
@@ -227,6 +229,7 @@ def getEaseFactor(card, ease=3, delay=0):
 def adjustPriorityInterval(card, conf):
     global INIT_IVL, SEC_IVL
     level=conf.get("sm2priority", 0)
+    assert level < len(PRIORITY_LEVELS)
     deferLeech=PRIORITY_LEVELS[level][1]
     INIT_IVL=PRIORITY_LEVELS[level][2]
     SEC_IVL=PRIORITY_LEVELS[level][3]
@@ -259,14 +262,15 @@ def nextInterval(self, card, ease):
             ef=getEaseFactor(card, ease)
             idealIvl -= (ef-1.3)*INIT_IVL/1.2
     else:
-        delay = 0
+        overdue = 0
         if card.queue!=1 and card.ivl>=21:
-            delay = max(-10, self.today - card.due) #slight punishment for reviewing ahead.
-            delay = min(card.ivl, min(100, delay)) #paused young decks
-        ef=getEaseFactor(card, ease, delay)
+            #Warning: does not acct for filtered decks card.odue
+            overdue = max(-10, self.today - card.due) #slight punishment for reviewing ahead.
+            overdue = min(card.ivl, min(100, overdue)) #paused young decks
+        ef=getEaseFactor(card, ease, overdue)
         modifier=conf['rev'].get('ivlFct', 1)
         #IVL*ef*modifier may result in smaller IVL
-        idealIvl = (card.ivl + delay // 2) * ef * modifier
+        idealIvl = (card.ivl + overdue // 2) * ef * modifier
 
     idealIvl = max(card.ivl+1, int(idealIvl)) #prevent smaller ivls from %modifier%
     return min(idealIvl, conf['rev']['maxIvl'])
@@ -278,11 +282,11 @@ def custFuzzedIvl(today, ivl, queue=2):
     if queue==1 or ivl<=1: return ivl #exact date for hard/agained
 
     minDay, maxDay = custFuzzIvlRange(ivl)
-    if minDay<90 and random.randint(0,6): #introduce noise
+    if minDay<90 and random.randint(0,6): #introduce noise, 15% noise
         #In cases of paused decks, balancing per deck is preferred.
         #But not in cases where there are too many sub-decks.
         perDeck=""
-        if maxDay>32: #2d overlap
+        if maxDay>32 and random.randint(0,4): #2d overlap, 20% noise
             perDeck="did in %s and"%ids2str(mw.col.decks.active())
 
         daysd = dict(mw.col.db.all("""
@@ -347,8 +351,9 @@ def revertInterval(card): #Inspired by the addon "Another Retreat"
     # return 0 #default sm2 behavior
     if card.ivl < 21: return 0
     hist = mw.col.db.list("""
-select ivl from revlog where cid = ? and ivl >= 21 order by id desc
-""", card.id)
+select ivl from revlog where cid = ? 
+and type < 3 and ivl >= 21 
+order by id desc""", card.id)
     if hist:
         hist = [i for i in hist if i < card.ivl]
         if hist:
