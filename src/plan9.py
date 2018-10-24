@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.7
+# Version: 0.0.8
 
 
 from __future__ import division
@@ -43,7 +43,6 @@ PRIORITY_LEVELS = {
   3:["Beefcake (Anki)", False, 1,  3], #similar to anki's default config
   4:["Auto Defer Leech", True, 4, 10], #1:6 for new, 4:10 max for leech cards
 }
-
 
 
 #####################################################################
@@ -196,7 +195,6 @@ def answerCard(self, card, ease, _old):
         card.left = 0
         if ease==4: #Mnemosyne adds this value first, anki adds this last, makes little diff to IVL
             card.factor=adjustFactor(card, INC_FACTOR)
-
 
 
     #LOG THIS REVIEW
@@ -385,26 +383,6 @@ def repeatCard(self, card, due):
     heappush(self._lrnQueue, (card.due, card.id))
 
 
-# #Randomize learning stack
-# def fillLrn(self, _old):  #Called B4 showQ hook
-    # if mw.col.sched.name=="std2":
-        # return _old(self)
-
-    # if not self.lrnCount: return False
-    # if self._lrnQueue: return True
-    # self._lrnQueue = self.col.db.all("""
-# select due, id from cards where
-# did in %s and queue = 1 and due < :lim
-# limit %d""" % (self._deckLimit(), self.reportLimit), lim=self.dayCutoff)
-    # if self._lrnQueue:
-        # r = random.Random()
-        # r.seed(time.time()*1000)
-        # r.shuffle(self._lrnQueue)
-        # self.lrnCount=len(self._lrnQueue)
-        # return self._lrnQueue
-    # return False
-
-
 #####################################################################
 ## Non-Gui Monkey patch assignment                        ###########
 #####################################################################
@@ -413,10 +391,6 @@ Reviewer._answerButtonList = wrap(Reviewer._answerButtonList, answerButtonList, 
 Reviewer._buttonTime = wrap(Reviewer._buttonTime, buttonTime, 'around')
 Scheduler.answerCard = wrap(Scheduler.answerCard, answerCard, 'around')
 Scheduler.answerButtons = wrap(Scheduler.answerButtons, answerButtons, 'around')
-
-#Turned off: no way to filter this for non-addon decks
-# Scheduler._fillLrn = wrap(Scheduler._fillLrn, fillLrn, 'around')
-
 
 
 ##################################################
