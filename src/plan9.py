@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.6
+# Version: 0.0.7
 
 
 from __future__ import division
@@ -55,12 +55,12 @@ def isFiltered():
     if mw.col.sched.name=="std2":
         return True
 
-    did = mw.col.decks.selected()
-    if mw.col.decks.get(did)['dyn']:
-        return True
-
     card = mw.reviewer.card
     conf = mw.col.decks.confForDid(card.did)
+    if conf['dyn']:
+        if not conf['resched']: return True
+        conf = mw.col.decks.confForDid(card.odid)
+
     if not conf.get("sm2emu", False):
         return True
 
@@ -146,6 +146,8 @@ def buttonTime(self, i, _old):
 LOG_LEARNED=0
 LOG_REVIEWED=1
 LOG_RELEARNED=2
+LOG_CRAM=3 #not used
+LOG_RESCHED=4
 
 def answerCard(self, card, ease, _old):
     if isFilteredCard:
@@ -161,6 +163,7 @@ def answerCard(self, card, ease, _old):
     revType = 'rev'
     logType = LOG_REVIEWED
     card.lastIvl = card.ivl
+    card.factor=adjustFactor(card, 0) # For revlog, old cards not initialized properly.
     if card.type==0 and card.queue==0: #new card
         logType = LOG_LEARNED
         revType = 'new'
@@ -181,6 +184,7 @@ def answerCard(self, card, ease, _old):
     elif ease<=4: #advance
         #Repeats an extra day to avoid judgement of learning bias (not in SM2)
         if card.queue==1 and card.ivl>=21:
+            logType = LOG_RESCHED
             card.due = self.today + 1
             # Adds 2-3 days load balanced
             # card.due = self.today + custFuzzedIvl(self.today, 2)
@@ -192,6 +196,8 @@ def answerCard(self, card, ease, _old):
         card.left = 0
         if ease==4: #Mnemosyne adds this value first, anki adds this last, makes little diff to IVL
             card.factor=adjustFactor(card, INC_FACTOR)
+
+
 
     #LOG THIS REVIEW
     logStats(card, ease, logType)
@@ -209,12 +215,14 @@ def adjustFactor(card, n):
     return max(fct,1300)
 
 
-#Trim EF based on number of lapses
 def getEaseFactor(card, ease=3, overdue=0):
     if card.reps==0: #prevent div by 0 on new cards
         card.factor=2500 #init
         return 2.5
     fct=adjustFactor(card, -overdue)
+    # return fct/1000.0 #SM2 Default (adjusted w/ overdue)
+
+    #Trim EF based on number of lapses
     lr=card.lapses/card.reps #Leech Ratio
     if ease==4 and card.queue!=1:
         if card.ivl>21:
@@ -238,8 +246,6 @@ def adjustPriorityInterval(card, conf):
 
 def nextIntervalString(card, ease): #button date display
     ivl=nextInterval(mw.col.sched, card, ease)
-    #displays exact fuzzed date, but maybe process intensive
-    # if ivl<33: ivl=custFuzzedIvl(mw.col.sched.today, ivl, card.queue)
     return fmtTimeSpan(ivl*86400, short=True)
 
 
@@ -248,6 +254,8 @@ def nextInterval(self, card, ease):
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
 
     conf=mw.col.decks.confForDid(card.did)
+    if conf['dyn']:
+        conf = mw.col.decks.confForDid(card.odid)
     deferLeech=adjustPriorityInterval(card, conf)
     idealIvl=1
 
@@ -377,29 +385,24 @@ def repeatCard(self, card, due):
     heappush(self._lrnQueue, (card.due, card.id))
 
 
-#Randomize learning stack
-def fillLrn(self, _old):
-    if mw.col.sched.name=="std2":
-        return _old(self)
+# #Randomize learning stack
+# def fillLrn(self, _old):  #Called B4 showQ hook
+    # if mw.col.sched.name=="std2":
+        # return _old(self)
 
-    did = mw.col.conf['curDeck']
-    conf = mw.col.decks.confForDid(did)
-    if conf.get("sm2emu", False):
-        return _old(self)
-
-    if not self.lrnCount: return False
-    if self._lrnQueue: return True
-    self._lrnQueue = self.col.db.all("""
-select due, id from cards where
-did in %s and queue = 1 and due < :lim
-limit %d""" % (self._deckLimit(), self.reportLimit), lim=self.dayCutoff)
-    if self._lrnQueue:
-        r = random.Random()
-        r.seed(time.time()*1000)
-        r.shuffle(self._lrnQueue)
-        self.lrnCount=len(self._lrnQueue)
-        return self._lrnQueue
-    return False
+    # if not self.lrnCount: return False
+    # if self._lrnQueue: return True
+    # self._lrnQueue = self.col.db.all("""
+# select due, id from cards where
+# did in %s and queue = 1 and due < :lim
+# limit %d""" % (self._deckLimit(), self.reportLimit), lim=self.dayCutoff)
+    # if self._lrnQueue:
+        # r = random.Random()
+        # r.seed(time.time()*1000)
+        # r.shuffle(self._lrnQueue)
+        # self.lrnCount=len(self._lrnQueue)
+        # return self._lrnQueue
+    # return False
 
 
 #####################################################################
@@ -410,7 +413,9 @@ Reviewer._answerButtonList = wrap(Reviewer._answerButtonList, answerButtonList, 
 Reviewer._buttonTime = wrap(Reviewer._buttonTime, buttonTime, 'around')
 Scheduler.answerCard = wrap(Scheduler.answerCard, answerCard, 'around')
 Scheduler.answerButtons = wrap(Scheduler.answerButtons, answerButtons, 'around')
-Scheduler._fillLrn = wrap(Scheduler._fillLrn, fillLrn, 'around')
+
+#Turned off: no way to filter this for non-addon decks
+# Scheduler._fillLrn = wrap(Scheduler._fillLrn, fillLrn, 'around')
 
 
 
@@ -470,6 +475,13 @@ def dconfsetupUi(self, Dialog):
 def toggleSM2EmuCB(self):
     off=self.sm2emu.checkState()==0
     on = not off
+
+    try: #no plan0 addon
+        if on and self.sm0emu.checkState():
+            self.sm0emu.setCheckState(0)
+            self.sm0Steps.setDisabled(True)
+    except: pass
+
     self.sm2priority.setDisabled(off)
     self.lrnGradInt.setDisabled(on)
     self.lrnEasyInt.setDisabled(on)
