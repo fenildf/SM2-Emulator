@@ -2,10 +2,21 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.0.8
+# Version: 0.1.0
 
 
 from __future__ import division
+# == User Config =========================================
+
+#FACTOR ADD/SUB
+INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
+DEC_FACTOR = -140  #HardBtn: -140 sm2, -150 anki
+ALT_FACTOR = 0     #AgainBtn: 0 sm2, -200 anki, -160 Mnemosyne
+
+# == End Config ==========================================
+##########################################################
+
+
 from aqt import mw
 from anki.hooks import wrap, addHook
 from aqt.reviewer import Reviewer
@@ -16,21 +27,8 @@ from heapq import *
 import time, random
 
 
-# CONFIG ###################################
-
-#ADDS SLIGHT INTERLEAVE, TIME DEPENDENT
-DELAY_AGAINED  = 0   #secs,  this + learning steps[0]
-DELAY_HARD     = 30  #secs,  this + learning steps[0]
-
-#FACTOR ADD/SUB
-INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
-DEC_FACTOR = -140  #HardBtn: -140 sm2, -150 anki
-ALT_FACTOR = 0     #AgainBtn: 0 sm2, -200 anki, -160 Mnemosyne
-
-# END_CONFIG ###########################################
-
-
 #Initial Intervals
+DYNAMIC_IVL=False
 INIT_IVL=1
 SEC_IVL =6    #anki: 1*EF or about 2-3 days after fuzz
 BUMP_IVL=21   #Breaks out of low interval hell
@@ -41,7 +39,7 @@ PRIORITY_LEVELS = {
   1:["Slacker",         False, 3,  7],
   2:["Vacation",        False, 5, 14],
   3:["Beefcake (Anki)", False, 1,  3], #similar to anki's default config
-  4:["Auto Defer Leech", True, 4, 10], #1:6 for new, 4:10 max for leech cards
+  4:["Defer Leech",     True,  4, 10], #1:6 for new, 4:10 max for leech cards (+LB)
 }
 
 
@@ -73,8 +71,21 @@ def isFiltered():
 def onShowQuestion():
     global isFilteredCard
     isFilteredCard=isFiltered()
-
+    if not isFilteredCard:
+        c=mw.reviewer.card
+        conf=mw.col.decks.confForDid(c.odid or c.did)
+        adjustPriorityInterval(c, conf)
 addHook('showQuestion', onShowQuestion)
+
+
+def adjustPriorityInterval(card, conf):
+    global INIT_IVL, SEC_IVL, DYNAMIC_IVL
+    level=conf.get("sm2priority", 0)
+    assert level < len(PRIORITY_LEVELS)
+    DYNAMIC_IVL=PRIORITY_LEVELS[level][1]
+    INIT_IVL=PRIORITY_LEVELS[level][2]
+    SEC_IVL=PRIORITY_LEVELS[level][3]
+    return DYNAMIC_IVL #bool
 
 
 #####################################################################
@@ -111,7 +122,13 @@ def buttonTime(self, i, _old):
     c=self.card
     text=None
     if i==1:
-        text='IVL 0' if c.ivl<21 else 'Revert'
+        # text='IVL 0' if c.ivl<21 else 'Revert'
+        if c.ivl<21: #Shows profile name
+            conf=mw.col.decks.confForDid(c.odid or c.did)
+            level=conf.get("sm2priority", 0)
+            text=PRIORITY_LEVELS[level][0]
+        else: text='Revert'
+
         return '<font color="pink" class="nobold">%s</font><br>'%text
 
     elif i==2:
@@ -124,7 +141,7 @@ def buttonTime(self, i, _old):
         return '<font color="aqua" class="nobold">%s%s</font><br>'%(extra,text)
 
     elif i==4:
-        if c.queue!=1 and c.ivl<=INIT_IVL:
+        if c.queue not in (1,3) and c.ivl<=INIT_IVL:
             text='%dd Bump'%BUMP_IVL
         else:
             # factor=getEaseFactor(c,i)
@@ -159,46 +176,57 @@ def answerCard(self, card, ease, _old):
         self._burySiblings(card)
 
     #SETUP LOGGING PARAMS
+    delay=0
     revType = 'rev'
     logType = LOG_REVIEWED
-    card.lastIvl = card.ivl
-    card.factor=adjustFactor(card, 0) # For revlog, old cards not initialized properly.
-    if card.type==0 and card.queue==0: #new card
+    card.factor = adjustFactor(card,0) #initialize new/malformed cards
+
+    #LOG TIME (for Display only)
+    if card.queue==2:
+        card.lastIvl = card.ivl
+    elif card.queue==3:
+        card.lastIvl = -86400 #1d learning step in secs
+    else:
+        card.lastIvl = -getDelay(self, card)
+
+    #LOG TYPE
+    if card.type==0 and card.queue==0:
         logType = LOG_LEARNED
         revType = 'new'
-    elif card.queue==1:
+    elif card.queue in (1,3):
         logType=LOG_RELEARNED if card.type==2 else LOG_LEARNED
         revType = 'lrn'
 
+
     #PROCESS GRADES
     if ease==1: #reset young, revert matured
+        card.ivl=revertInterval(card)
         if not isLeechCard(card): #chk suspend
-            card.ivl=revertInterval(card)
-            repeatCard(self, card, DELAY_AGAINED) #sets queue to 1
+            delay=repeatCard(self, card) #sets queue to 1
 
     elif ease==2: #repeat, -140ef
         card.factor=adjustFactor(card, DEC_FACTOR)
-        repeatCard(self, card, DELAY_HARD) #sets queue to 1
+        delay=repeatCard(self, card) #sets queue to 1
 
     elif ease<=4: #advance
         #Repeats an extra day to avoid judgement of learning bias (not in SM2)
         if card.queue==1 and card.ivl>=21:
-            logType = LOG_RESCHED
-            card.due = self.today + 1
-            # Adds 2-3 days load balanced
-            # card.due = self.today + custFuzzedIvl(self.today, 2)
+            delay=repeatCard(self, card, 1) #sets queue to 3
         else:
             idealIvl = nextInterval(self, card, ease)
             card.ivl = custFuzzedIvl(self.today, idealIvl, card.queue)
             card.due = self.today + card.ivl
-        card.type = card.queue = 2
-        card.left = 0
+            card.type = card.queue = 2
+            card.left = 0
+
         if ease==4: #Mnemosyne adds this value first, anki adds this last, makes little diff to IVL
             card.factor=adjustFactor(card, INC_FACTOR)
-
+        if card.odid:
+            card.did = card.odid
+            card.odid=card.odue=0
 
     #LOG THIS REVIEW
-    logStats(card, ease, logType)
+    logStats(card, ease, logType, delay)
     self._updateStats(card, revType)
     self._updateStats(card, 'time', card.timeTaken())
     card.reps += 1
@@ -214,32 +242,20 @@ def adjustFactor(card, n):
 
 
 def getEaseFactor(card, ease=3, overdue=0):
-    if card.reps==0: #prevent div by 0 on new cards
-        card.factor=2500 #init
-        return 2.5
     fct=adjustFactor(card, -overdue)
-    # return fct/1000.0 #SM2 Default (adjusted w/ overdue)
+    if card.reps<5: #Not enough data
+        return fct/1000.0
 
     #Trim EF based on number of lapses
     lr=card.lapses/card.reps #Leech Ratio
-    if ease==4 and card.queue!=1:
+    if ease==4 and card.queue not in (1,3):
         if card.ivl>21:
             fct=max(1.2, fct * (1.05-lr) / 1000.0)
         else:
             fct=max(1.3, fct * (1.15-lr) / 1000.0)
     else: #ease3
         fct=max(1.2, fct * (1-lr) / 1000.0)
-    return min(4, fct) #TODO: find max optimal value
-
-
-def adjustPriorityInterval(card, conf):
-    global INIT_IVL, SEC_IVL
-    level=conf.get("sm2priority", 0)
-    assert level < len(PRIORITY_LEVELS)
-    deferLeech=PRIORITY_LEVELS[level][1]
-    INIT_IVL=PRIORITY_LEVELS[level][2]
-    SEC_IVL=PRIORITY_LEVELS[level][3]
-    return deferLeech #bool
+    return min(3, fct) #TODO: find max optimal value.
 
 
 def nextIntervalString(card, ease): #button date display
@@ -248,46 +264,58 @@ def nextIntervalString(card, ease): #button date display
 
 
 def nextInterval(self, card, ease):
-    if ease==4 and card.queue!=1 and card.ivl<=INIT_IVL:
+    if ease==4 and card.queue not in (1,3) and card.ivl<=INIT_IVL:
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
 
-    conf=mw.col.decks.confForDid(card.did)
-    if conf['dyn']:
-        conf = mw.col.decks.confForDid(card.odid)
-    deferLeech=adjustPriorityInterval(card, conf)
-    idealIvl=1
+    conf=mw.col.decks.confForDid(card.odid or card.did)
 
-    if card.ivl==0:
-        idealIvl=INIT_IVL
-        if deferLeech:
-            ef=getEaseFactor(card, ease)
-            idealIvl -= (ef-1.3)*3/1.2
-    elif card.ivl<SEC_IVL:
+    #In cases where user switches profiles,
+    #creating a large gap between init ivls.
+    idealIvl=INIT_IVL
+    if DYNAMIC_IVL:
+        ef=getEaseFactor(card, ease)
+        idealIvl -= (ef-1.3)*3/1.2
+
+    #Can't use 0 based ivl in anki as that is considered an unfixed error.
+    if card.ivl<idealIvl or (card.queue==1 and card.ivl<=idealIvl):
+        if card.queue==2:
+            idealIvl+=card.ivl+1
+
+    elif card.ivl<SEC_IVL: #large ivl gap when user switch profiles.
         idealIvl=SEC_IVL
-        if deferLeech:
+        if DYNAMIC_IVL: #possible looping w/ multi profiles
             ef=getEaseFactor(card, ease)
             idealIvl -= (ef-1.3)*INIT_IVL/1.2
+            idealIvl = max(card.ivl+INIT_IVL,idealIvl) #loop breaker
+
     else:
         overdue = 0
-        if card.queue!=1 and card.ivl>=21:
-            #Warning: does not acct for filtered decks card.odue
-            overdue = max(-10, self.today - card.due) #slight punishment for reviewing ahead.
+        if card.queue==2 and card.ivl>=21:
+            # Note: due on learning cards count by secs
+            #       due on review cards count by days
+            #slight punishment for reviewing ahead.
+            overdue = max(-10, self.today - (card.odue or card.due))
             overdue = min(card.ivl, min(100, overdue)) #paused young decks
         ef=getEaseFactor(card, ease, overdue)
+        #IVL*modifier may result in smaller IVL
         modifier=conf['rev'].get('ivlFct', 1)
-        #IVL*ef*modifier may result in smaller IVL
         idealIvl = (card.ivl + overdue // 2) * ef * modifier
+        #prevent smaller ivls from %modifier%
+        idealIvl = max(card.ivl+1, idealIvl)
 
-    idealIvl = max(card.ivl+1, int(idealIvl)) #prevent smaller ivls from %modifier%
-    return min(idealIvl, conf['rev']['maxIvl'])
+    return min(int(idealIvl), conf['rev']['maxIvl'])
 
 
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
 #Some codes came from anki.sched.Scheduler.dueForecast.
 def custFuzzedIvl(today, ivl, queue=2):
-    if queue==1 or ivl<=1: return ivl #exact date for hard/agained
+    if ivl<=1 or (not DYNAMIC_IVL and queue==1):
+        return ivl #exact date for hard/agained
 
     minDay, maxDay = custFuzzIvlRange(ivl)
+    if DYNAMIC_IVL and ivl<=SEC_IVL:
+        maxDay+=ivl//5 #LB: 0 under 5, +1 under 10d, +2 on 10d
+
     if minDay<90 and random.randint(0,6): #introduce noise, 15% noise
         #In cases of paused decks, balancing per deck is preferred.
         #But not in cases where there are too many sub-decks.
@@ -333,12 +361,13 @@ def custFuzzIvlRange(ivl): # Multiples of 7
 #2 = relearned
 #3 = filtered, not used here
 
-def logStats(card, ease, type): #copied & modded from anki.sched.logStats
+def logStats(card, ease, type, delay): #copied & modded from anki.sched.logStats
     def log():
         mw.col.db.execute(
             "insert into revlog values (?,?,?,?,?,?,?,?,?)",
             int(time.time()*1000), card.id, mw.col.usn(), ease,
-            card.ivl, card.lastIvl, card.factor, card.timeTaken(), type)
+            -delay or card.ivl or 1, card.lastIvl,
+            card.factor, card.timeTaken(), type)
     try:
         log()
     except:
@@ -346,16 +375,18 @@ def logStats(card, ease, type): #copied & modded from anki.sched.logStats
         log()
 
 
-def isLeechCard(card): #review cards only
-    if card.queue!=2: return False
+def isLeechCard(card):
+    if card.queue<2: return False
+    #rev and day lrn cards only
     card.lapses += 1
     conf=mw.col.sched._lapseConf(card)
-    return mw.col.sched._checkLeech(card,conf)
+    leech=mw.col.sched._checkLeech(card,conf)
+    return leech and card.queue == -1
 
 
 def revertInterval(card): #Inspired by the addon "Another Retreat"
-    # return 0 #default sm2 behavior
-    if card.ivl < 21: return 0
+    # return 1 #default sm2 behavior
+    if card.ivl < 21: return 1
     hist = mw.col.db.list("""
 select ivl from revlog where cid = ? 
 and type < 3 and ivl >= 21 
@@ -365,22 +396,30 @@ order by id desc""", card.id)
         if hist:
             card.factor=adjustFactor(card, ALT_FACTOR)
             return hist[0]
-    return 0
+    return 1
 
 
-def repeatCard(self, card, due):
-    card.left = 1001
-    conf=self._lrnConf(card)
-    delay=self._delayForGrade(conf,0)
-
+def repeatCard(self, card, days=0):
     #new cards in learning steps: card.type=1
     #lapse cards in learning steps: card.type=2
     card.type=2 if card.type==2 else 1
-    card.queue = 1
+    card.left = 1001
+    if days:
+        delay = 86400 #1d learning step in secs
+        card.due = self.today + days
+        card.queue = 3
+    else:
+        delay=getDelay(self, card)
+        card.due = intTime() + delay
+        card.queue = 1
+        self.lrnCount += 1
+        heappush(self._lrnQueue, (card.due, card.id))
+    return delay
 
-    card.due = intTime() + delay + due
-    self.lrnCount += 1
-    heappush(self._lrnQueue, (card.due, card.id))
+
+def getDelay(self, card):
+    conf=self._lrnConf(card)
+    return self._delayForGrade(conf,0)
 
 
 #####################################################################
