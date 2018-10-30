@@ -2,11 +2,14 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.0
+# Version: 0.1.2
 
 
 from __future__ import division
 # == User Config =========================================
+
+#No added bonuses, but still allows for different profiles
+DEFAULT_SM2_BEHAVIOR = False
 
 #FACTOR ADD/SUB
 INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
@@ -47,6 +50,7 @@ PRIORITY_LEVELS = {
 ####   Filters, don't apply addon to certain models  ################
 #####################################################################
 isFilteredCard = False
+isRevertedCard = False
 
 def isFiltered():
     if mw.col.sched.name=="std2":
@@ -69,12 +73,13 @@ def isFiltered():
 
 
 def onShowQuestion():
-    global isFilteredCard
+    global isFilteredCard, isRevertedCard
     isFilteredCard=isFiltered()
     if not isFilteredCard:
         c=mw.reviewer.card
         conf=mw.col.decks.confForDid(c.odid or c.did)
         adjustPriorityInterval(c, conf)
+        isRevertedCard=isReverted(c)
 addHook('showQuestion', onShowQuestion)
 
 
@@ -122,13 +127,14 @@ def buttonTime(self, i, _old):
     c=self.card
     text=None
     if i==1:
-        # text='IVL 0' if c.ivl<21 else 'Revert'
         if c.ivl<21: #Shows profile name
             conf=mw.col.decks.confForDid(c.odid or c.did)
             level=conf.get("sm2priority", 0)
             text=PRIORITY_LEVELS[level][0]
-        else: text='Revert'
-
+        elif DEFAULT_SM2_BEHAVIOR:
+            text="IVL 0"
+        else:
+            text='Revert'
         return '<font color="pink" class="nobold">%s</font><br>'%text
 
     elif i==2:
@@ -136,7 +142,7 @@ def buttonTime(self, i, _old):
         return '<font color="gray" class="nobold">%s</font><br>'%text
 
     elif i==3:
-        extra='1d, ' if c.queue==1 and c.ivl>=21 else ''
+        extra='1d, ' if isRevertedCard else ''
         text=nextIntervalString(c, i)
         return '<font color="aqua" class="nobold">%s%s</font><br>'%(extra,text)
 
@@ -162,7 +168,7 @@ def buttonTime(self, i, _old):
 LOG_LEARNED=0
 LOG_REVIEWED=1
 LOG_RELEARNED=2
-LOG_CRAM=3 #not used
+LOG_CRAM=3
 LOG_RESCHED=4
 
 def answerCard(self, card, ease, _old):
@@ -175,13 +181,10 @@ def answerCard(self, card, ease, _old):
     if self._burySiblingsOnAnswer:
         self._burySiblings(card)
 
-    #SETUP LOGGING PARAMS
-    delay=0
-    revType = 'rev'
-    logType = LOG_REVIEWED
     card.factor = adjustFactor(card,0) #initialize new/malformed cards
 
     #LOG TIME (for Display only)
+    delay=0
     if card.queue==2:
         card.lastIvl = card.ivl
     elif card.queue==3:
@@ -190,9 +193,15 @@ def answerCard(self, card, ease, _old):
         card.lastIvl = -getDelay(self, card)
 
     #LOG TYPE
+    revType = 'rev'
+    logType = LOG_REVIEWED
     if card.type==0 and card.queue==0:
         logType = LOG_LEARNED
         revType = 'new'
+    elif card.odid:
+        if card.queue!=2:
+            logType=LOG_CRAM
+            revType = 'lrn'
     elif card.queue in (1,3):
         logType=LOG_RELEARNED if card.type==2 else LOG_LEARNED
         revType = 'lrn'
@@ -205,12 +214,14 @@ def answerCard(self, card, ease, _old):
             delay=repeatCard(self, card) #sets queue to 1
 
     elif ease==2: #repeat, -140ef
+        if not DEFAULT_SM2_BEHAVIOR and card.factor==1300:
+            card.ivl=max(INIT_IVL, int(card.ivl*0.95))
         card.factor=adjustFactor(card, DEC_FACTOR)
         delay=repeatCard(self, card) #sets queue to 1
 
     elif ease<=4: #advance
         #Repeats an extra day to avoid judgement of learning bias (not in SM2)
-        if card.queue==1 and card.ivl>=21:
+        if isRevertedCard:
             delay=repeatCard(self, card, 1) #sets queue to 3
         else:
             idealIvl = nextInterval(self, card, ease)
@@ -243,7 +254,7 @@ def adjustFactor(card, n):
 
 def getEaseFactor(card, ease=3, overdue=0):
     fct=adjustFactor(card, -overdue)
-    if card.reps<5: #Not enough data
+    if DEFAULT_SM2_BEHAVIOR or card.reps<5: #Not enough data
         return fct/1000.0
 
     #Trim EF based on number of lapses
@@ -266,6 +277,8 @@ def nextIntervalString(card, ease): #button date display
 def nextInterval(self, card, ease):
     if ease==4 and card.queue not in (1,3) and card.ivl<=INIT_IVL:
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
+    if card.queue==3: #Day learning cards
+        return card.ivl+1
 
     conf=mw.col.decks.confForDid(card.odid or card.did)
 
@@ -309,6 +322,8 @@ def nextInterval(self, card, ease):
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
 #Some codes came from anki.sched.Scheduler.dueForecast.
 def custFuzzedIvl(today, ivl, queue=2):
+    if DEFAULT_SM2_BEHAVIOR: return ivl
+
     if ivl<=1 or (not DYNAMIC_IVL and queue==1):
         return ivl #exact date for hard/agained
 
@@ -384,24 +399,26 @@ def isLeechCard(card):
     return leech and card.queue == -1
 
 
-def revertInterval(card): #Inspired by the addon "Another Retreat"
-    # return 1 #default sm2 behavior
-    if card.ivl < 21: return 1
+#Inspired by the addon "Another Retreat"
+def revertInterval(card):
+    if DEFAULT_SM2_BEHAVIOR: return 1
+    if card.ivl < 21 or card.queue==3: return 1
+    lim=card.ivl//1.2 #In case of bad mods causing large gaps in revlog.
     hist = mw.col.db.list("""
 select ivl from revlog where cid = ? 
-and type < 3 and ivl >= 21 
-order by id desc""", card.id)
+and type < 3 and ivl between 21 and ?
+order by id desc limit 100""", card.id, lim)
     if hist:
-        hist = [i for i in hist if i < card.ivl]
-        if hist:
-            card.factor=adjustFactor(card, ALT_FACTOR)
-            return hist[0]
-    return 1
+        ret=hist[0]
+    else:
+        ret=card.ivl//2.5
+    card.factor=adjustFactor(card, ALT_FACTOR)
+    return 1 if ret<21 else ret
 
 
 def repeatCard(self, card, days=0):
-    #new cards in learning steps: card.type=1
-    #lapse cards in learning steps: card.type=2
+    #Note: new cards in learning steps: card.type=1
+    #      lapse cards in learning steps: card.type=2
     card.type=2 if card.type==2 else 1
     card.left = 1001
     if days:
@@ -420,6 +437,24 @@ def repeatCard(self, card, days=0):
 def getDelay(self, card):
     conf=self._lrnConf(card)
     return self._delayForGrade(conf,0)
+
+
+#A process intense way to separate out ease1 or ease2 repeats
+#while still being compliant with Anki
+def isReverted(card):
+    if DEFAULT_SM2_BEHAVIOR: return False
+    if card.queue != 1: return False
+    if card.ivl   < 21: return False
+    en=mw.col.db.all("""
+select type, ease from revlog
+where type < 3 and cid = ?
+order by id desc limit 20""", card.id)
+    if en: #filter out ease1 from type 1 or 2
+        for (t, e) in en:
+            if e==1 and t in (LOG_REVIEWED,LOG_RELEARNED):
+                return True
+            if t==LOG_REVIEWED: break #limit breaker
+    return False
 
 
 #####################################################################
