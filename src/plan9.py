@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.2
+# Version: 0.1.3
 
 
 from __future__ import division
@@ -147,7 +147,8 @@ def buttonTime(self, i, _old):
         return '<font color="aqua" class="nobold">%s%s</font><br>'%(extra,text)
 
     elif i==4:
-        if c.queue not in (1,3) and c.ivl<=INIT_IVL:
+        if not DEFAULT_SM2_BEHAVIOR and \
+        c.queue not in (1,3) and c.ivl<=INIT_IVL:
             text='%dd Bump'%BUMP_IVL
         else:
             # factor=getEaseFactor(c,i)
@@ -275,7 +276,8 @@ def nextIntervalString(card, ease): #button date display
 
 
 def nextInterval(self, card, ease):
-    if ease==4 and card.queue not in (1,3) and card.ivl<=INIT_IVL:
+    if not DEFAULT_SM2_BEHAVIOR and ease==4 and \
+    card.queue not in (1,3) and card.ivl<=INIT_IVL:
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
     if card.queue==3: #Day learning cards
         return card.ivl+1
