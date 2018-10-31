@@ -215,7 +215,7 @@ def answerCard(self, card, ease, _old):
             delay=repeatCard(self, card) #sets queue to 1
 
     elif ease==2: #repeat, -140ef
-        if not DEFAULT_SM2_BEHAVIOR and card.factor==1300:
+        if not DEFAULT_SM2_BEHAVIOR and card.factor<=1300:
             card.ivl=max(INIT_IVL, int(card.ivl*0.95))
         card.factor=adjustFactor(card, DEC_FACTOR)
         delay=repeatCard(self, card) #sets queue to 1
