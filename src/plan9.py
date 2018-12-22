@@ -132,7 +132,7 @@ def buttonTime(self, i, _old):
     c=self.card
     text=None
     if i==1:
-        if c.ivl<21: #Shows profile name
+        if c.ivl<21 or not USE_REVERT_FOR_LAPSE: #Shows profile name
             conf=mw.col.decks.confForDid(c.odid or c.did)
             level=conf.get("sm2priority", 0)
             text=PRIORITY_LEVELS[level][0]
