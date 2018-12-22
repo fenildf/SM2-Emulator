@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.3
+# Version: 0.1.4
 
 
 from __future__ import division
@@ -10,6 +10,10 @@ from __future__ import division
 
 #No added bonuses, but still allows for different profiles
 DEFAULT_SM2_BEHAVIOR = False
+
+#Similar to another retreat, but without -200 to EF.
+#Added as an option, was always true in previous versions.
+USE_REVERT_FOR_LAPSE = True
 
 #FACTOR ADD/SUB
 INC_FACTOR = 100   #EasyBtn: 100 sm2, 150 anki
@@ -57,6 +61,7 @@ def isFiltered():
         return True
 
     card = mw.reviewer.card
+    if not card: return True
     conf = mw.col.decks.confForDid(card.did)
     if conf['dyn']:
         if not conf['resched']: return True
@@ -226,7 +231,7 @@ def answerCard(self, card, ease, _old):
             delay=repeatCard(self, card, 1) #sets queue to 3
         else:
             idealIvl = nextInterval(self, card, ease)
-            card.ivl = custFuzzedIvl(self.today, idealIvl, card.queue)
+            card.ivl = custFuzzedIvl(self.today, idealIvl, card)
             card.due = self.today + card.ivl
             card.type = card.queue = 2
             card.left = 0
@@ -235,15 +240,15 @@ def answerCard(self, card, ease, _old):
             card.factor=adjustFactor(card, INC_FACTOR)
         if card.odid:
             card.did = card.odid
-            card.odid=card.odue=0
+        card.odid=card.odue=0
 
     #LOG THIS REVIEW
     logStats(card, ease, logType, delay)
     self._updateStats(card, revType)
     self._updateStats(card, 'time', card.timeTaken())
     card.reps += 1
-    card.mod = intTime()
-    card.usn = self.col.usn()
+    # card.mod = intTime()
+    # card.usn = self.col.usn()
     card.flushSched()
 
 
@@ -280,7 +285,7 @@ def nextInterval(self, card, ease):
     card.queue not in (1,3) and card.ivl<=INIT_IVL:
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
     if card.queue==3: #Day learning cards
-        return card.ivl+1
+        return int(card.ivl+1) #in anki, lapsed learning cards may use float
 
     conf=mw.col.decks.confForDid(card.odid or card.did)
 
@@ -323,15 +328,16 @@ def nextInterval(self, card, ease):
 
 #REPLACE RANDOMIZED DATES WITH LOAD BALANCING.
 #Some codes came from anki.sched.Scheduler.dueForecast.
-def custFuzzedIvl(today, ivl, queue=2):
+def custFuzzedIvl(today, ivl, card):
     if DEFAULT_SM2_BEHAVIOR: return ivl
 
-    if ivl<=1 or (not DYNAMIC_IVL and queue==1):
+    if ivl<=1 or (not DYNAMIC_IVL and card.queue==1):
         return ivl #exact date for hard/agained
 
     minDay, maxDay = custFuzzIvlRange(ivl)
     if DYNAMIC_IVL and ivl<=SEC_IVL:
         maxDay+=ivl//5 #LB: 0 under 5, +1 under 10d, +2 on 10d
+
 
     if minDay<90 and random.randint(0,6): #introduce noise, 15% noise
         #In cases of paused decks, balancing per deck is preferred.
@@ -340,19 +346,34 @@ def custFuzzedIvl(today, ivl, queue=2):
         if maxDay>32 and random.randint(0,4): #2d overlap, 20% noise
             perDeck="did in %s and"%ids2str(mw.col.decks.active())
 
+        mindue=today+minDay
+        maxdue=today+maxDay
+
+        #Check for sibling days
+        sibDays = mw.col.db.list("""
+select due from cards
+where %s queue in (2,3) and nid=?
+and (due between ? and ?
+or odue between ? and ?)
+group by due
+order by due"""%perDeck, card.nid,
+        mindue, maxdue, mindue, maxdue)
+
         daysd = dict(mw.col.db.all("""
 select due, count() from cards
-where %s queue = 2
-and due between ? and ?
+where %s queue in (2,3)
+and (due between ? and ?
+or odue between ? and ?)
 group by due
 order by due"""%perDeck,
-        today+minDay, today+maxDay))
+        mindue, maxdue, mindue, maxdue))
 
         if daysd:
-            for d in range(minDay,maxDay):
-                d = today+d
+            for d in range(mindue,maxdue):
                 if d not in daysd:
                     daysd[d] = 0
+                if d in sibDays:
+                    daysd[d] += 5
             idealDay=min(daysd, key=daysd.get)
             return idealDay - today
     return random.randint(minDay, maxDay)
@@ -404,6 +425,7 @@ def isLeechCard(card):
 #Inspired by the addon "Another Retreat"
 def revertInterval(card):
     if DEFAULT_SM2_BEHAVIOR: return 1
+    if not USE_REVERT_FOR_LAPSE: return 1
     if card.ivl < 21 or card.queue==3: return 1
     lim=card.ivl//1.2 #In case of bad mods causing large gaps in revlog.
     hist = mw.col.db.list("""
@@ -423,17 +445,23 @@ def repeatCard(self, card, days=0):
     #      lapse cards in learning steps: card.type=2
     card.type=2 if card.type==2 else 1
     card.left = 1001
+    if card.odid or not card.odue:
+        card.odue = self.today
+
     if days:
-        delay = 86400 #1d learning step in secs
+        delay = 86400 #1d learning step in secs, for logging
         card.due = self.today + days
         card.queue = 3
     else:
-        delay=getDelay(self, card)
-        card.due = intTime() + delay
+        delay=getDelay(self, card) #return for revlog
+        fuzz=random.randrange(1, 30)
+        card.due=intTime() + delay + fuzz
+        card.due=min(self.dayCutoff-1, card.due)
         card.queue = 1
         self.lrnCount += 1
+        # if (card.due<(intTime()+self.col.conf['collapseTime'])): #V2
         heappush(self._lrnQueue, (card.due, card.id))
-    return delay
+    return delay #ivl time for revlog
 
 
 def getDelay(self, card):
@@ -445,6 +473,7 @@ def getDelay(self, card):
 #while still being compliant with Anki
 def isReverted(card):
     if DEFAULT_SM2_BEHAVIOR: return False
+    if not USE_REVERT_FOR_LAPSE: return False
     if card.queue != 1: return False
     if card.ivl   < 21: return False
     en=mw.col.db.all("""
@@ -452,7 +481,7 @@ select type, ease from revlog
 where type < 3 and cid = ?
 order by id desc limit 20""", card.id)
     if en: #filter out ease1 from type 1 or 2
-        for (t, e) in en:
+        for t,e in en:
             if e==1 and t in (LOG_REVIEWED,LOG_RELEARNED):
                 return True
             if t==LOG_REVIEWED: break #limit breaker
