@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.4
+# Version: 0.1.5
 
 
 from __future__ import division
@@ -445,14 +445,14 @@ def repeatCard(self, card, days=0):
     #      lapse cards in learning steps: card.type=2
     card.type=2 if card.type==2 else 1
     card.left = 1001
-    if card.odid or not card.odue:
-        card.odue = self.today
-
     if days:
         delay = 86400 #1d learning step in secs, for logging
         card.due = self.today + days
+        card.odue = 0
         card.queue = 3
     else:
+        if card.odid or not card.odue:
+            card.odue = self.today
         delay=getDelay(self, card) #return for revlog
         fuzz=random.randrange(1, 30)
         card.due=intTime() + delay + fuzz
