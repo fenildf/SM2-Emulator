@@ -209,7 +209,7 @@ def answerCard(self, card, ease, _old):
             logType=LOG_CRAM
             revType = 'lrn'
     elif card.queue in (1,3):
-        logType=LOG_RELEARNED if card.type==2 else LOG_LEARNED
+        logType=LOG_RELEARNED if card.type in (2,3) else LOG_LEARNED
         revType = 'lrn'
 
 
@@ -438,18 +438,21 @@ order by id desc limit 100""", card.id, lim)
 
 
 def repeatCard(self, card, days=0):
-    #Note: new cards in learning steps: card.type=1
-    #      lapse cards in learning steps: card.type=2
-    card.type=2 if card.type==2 else 1
+    if card.type==2:
+        # if self.name=="std2":
+            # card.type=3
+        # else: #v1
+        card.odue=self.today #for bury or suspend
+    else:
+        card.type=1
     card.left = 1001
+
     if days:
         delay = 86400 #1d learning step in secs, for logging
         card.due = self.today + days
         card.odue = 0
         card.queue = 3
     else:
-        if card.odid or not card.odue:
-            card.odue = self.today
         delay=getDelay(self, card) #return for revlog
         fuzz=random.randrange(1, 30)
         card.due=intTime() + delay + fuzz
