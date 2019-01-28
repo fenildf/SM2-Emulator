@@ -266,13 +266,13 @@ def getEaseFactor(card, ease=3, overdue=0):
     #Trim EF based on number of lapses
     lr=card.lapses/card.reps #Leech Ratio
     if ease==4 and card.queue not in (1,3):
-        if card.ivl>21:
-            fct=max(1.2, fct * (1.05-lr) / 1000.0)
+        if card.ivl>SEC_IVL+20:
+            fct=max(1.1, fct * (1.05-lr) / 1000.0)
         else:
-            fct=max(1.3, fct * (1.15-lr) / 1000.0)
+            fct=max(1.2, fct * (1.15-lr) / 1000.0)
     else: #ease3
         fct=max(1.2, fct * (1-lr) / 1000.0)
-    return min(3, fct) #TODO: find max optimal value.
+    return min(4, fct)
 
 
 def nextIntervalString(card, ease): #button date display
@@ -286,16 +286,16 @@ def nextInterval(sched, card, ease):
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
 
     if card.queue==3 and card.ivl>=21: #Day learning cards, for revert only
-        return int(card.ivl+1) #in anki, lapsed learning cards may use float
+        return int(card.ivl*1.1)
 
     conf=mw.col.decks.confForDid(card.odid or card.did)
 
     #In cases where user switches profiles,
     #creating a large gap between init ivls.
     idealIvl=INIT_IVL
+    ef=getEaseFactor(card)
     if DYNAMIC_IVL:
-        ef=getEaseFactor(card, ease)
-        idealIvl -= (ef-1.3)*3/1.2
+        idealIvl=int(idealIvl-(ef-1.3)*3/1.2)
 
     #Can't use 0 based ivl in anki as that is considered an unfixed error.
     if card.ivl<idealIvl or (card.queue in (1,3) and card.ivl<=idealIvl):
@@ -305,8 +305,7 @@ def nextInterval(sched, card, ease):
     elif card.ivl<SEC_IVL: #large ivl gap when user switch profiles.
         idealIvl=SEC_IVL
         if DYNAMIC_IVL: #possible looping w/ multi profiles
-            ef=getEaseFactor(card, ease)
-            idealIvl -= (ef-1.3)*INIT_IVL/1.2
+            idealIvl=int(idealIvl-(ef-1.3)*INIT_IVL/1.2)
             idealIvl = max(card.ivl+INIT_IVL,idealIvl) #loop breaker
 
     else:
@@ -318,14 +317,14 @@ def nextInterval(sched, card, ease):
             overdue = max(-10, sched._daysLate(card))
             overdue = min(card.ivl, min(100, overdue)) #paused young decks
 
-
         ef=getEaseFactor(card, ease, overdue)
         #IVL*modifier may result in smaller IVL
         modifier=conf['rev'].get('ivlFct', 1)
-        idealIvl = (card.ivl*ef + overdue*1.1) * modifier
+        idealIvl=(card.ivl*ef + overdue*1.1) * modifier
 
         #prevent smaller ivls from %modifier%
-        idealIvl = max(card.ivl+1, idealIvl)
+        cap=max(SEC_IVL+1, card.ivl*1.1)
+        idealIvl=max(cap, idealIvl)
 
     return min(int(idealIvl), conf['rev']['maxIvl'])
 
