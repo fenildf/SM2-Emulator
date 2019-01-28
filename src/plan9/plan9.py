@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.9
+# Version: 0.2.0
 
 
 from __future__ import division
@@ -429,14 +429,14 @@ def revertInterval(card):
     lim=card.ivl//1.2 #In case of bad mods causing large gaps in revlog.
     hist = mw.col.db.list("""
 select ivl from revlog where cid = ? 
-and type < 3 and ivl between 21 and ?
+and type < 3 and ivl between 10 and ?
 order by id desc limit 100""", card.id, lim)
     if hist:
         ret=hist[0]
     else:
         ret=card.ivl//2.5
     card.factor=adjustFactor(card, ALT_FACTOR)
-    return 1 if ret<21 else ret
+    return 1 if ret<11 else min(90, ret) #capped at 40 for sm8
 
 
 def repeatCard(self, card, days=0):
