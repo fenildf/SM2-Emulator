@@ -2,7 +2,7 @@
 # Copyright: (C) 2018 Lovac42
 # Support: https://github.com/lovac42/SM2-Emulator
 # License: GNU GPL, version 3 or later; http://www.gnu.org/copyleft/gpl.html
-# Version: 0.1.7
+# Version: 0.1.8
 
 
 from __future__ import division
@@ -280,7 +280,7 @@ def nextIntervalString(card, ease): #button date display
     return fmtTimeSpan(ivl*86400, short=True)
 
 
-def nextInterval(self, card, ease):
+def nextInterval(sched, card, ease):
     if not DEFAULT_SM2_BEHAVIOR and ease==4 and \
     card.queue not in (1,3) and card.ivl<=INIT_IVL:
         return random.randint(BUMP_IVL-1, BUMP_IVL+2)
@@ -311,16 +311,19 @@ def nextInterval(self, card, ease):
 
     else:
         overdue = 0
-        if card.queue==2 and card.ivl>=21:
+        if card.queue==2:
             # Note: due on learning cards count by secs
             #       due on review cards count by days
             #slight punishment for reviewing ahead.
-            overdue = max(-10, self.today - (card.odue or card.due))
+            overdue = max(-10, sched._daysLate(card))
             overdue = min(card.ivl, min(100, overdue)) #paused young decks
+
+
         ef=getEaseFactor(card, ease, overdue)
         #IVL*modifier may result in smaller IVL
         modifier=conf['rev'].get('ivlFct', 1)
-        idealIvl = (card.ivl + overdue // 2) * ef * modifier
+        idealIvl = (card.ivl*ef + overdue*1.1) * modifier
+
         #prevent smaller ivls from %modifier%
         idealIvl = max(card.ivl+1, idealIvl)
 
